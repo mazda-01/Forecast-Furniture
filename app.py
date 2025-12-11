@@ -140,7 +140,7 @@ else:
         full_pipeline = train_pipeline(df)
 
 # Применение препроцессинга
-features_data = full_pipeline['preprocess'].transform(df)
+features_data = full_pipeline['preprocess'].fit_transform(df)  # fit_transform безопасен всегда
 X = features_data.drop(columns=['Sales'])
 predictions = full_pipeline['model'].predict(X)
 predictions_rounded = np.round(predictions).astype(int)
