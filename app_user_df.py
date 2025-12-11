@@ -23,6 +23,7 @@ uploaded_file = st.file_uploader("Загрузите файл", type=['csv', 'xl
 
 if uploaded_file is not None:
     try:
+        # Чтение файла
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
@@ -32,6 +33,7 @@ if uploaded_file is not None:
         st.write("Первые строки данных:")
         st.dataframe(df.head())
 
+        # Автоопределение колонок
         date_candidates = [col for col in df.columns if any(k in col.lower() for k in ['date', 'time', 'order'])]
         value_candidates = [col for col in df.columns if any(k in col.lower() for k in ['sales', 'value', 'amount', 'revenue', 'quantity'])]
 
@@ -44,11 +46,13 @@ if uploaded_file is not None:
                 df = df[[date_col, value_col]].sort_values(date_col)
                 df = df.set_index(date_col)
 
+                # Месячная агрегация
                 monthly = df.resample('M')[value_col].sum()
                 data = pd.DataFrame({'value': monthly})
                 data = data.reset_index()
                 data = data.rename(columns={date_col: 'date'})
 
+                # Feature Engineering
                 class FeatureEngineer(BaseEstimator, TransformerMixin):
                     def __init__(self, lags=12):
                         self.lags = lags
@@ -81,6 +85,10 @@ if uploaded_file is not None:
                 fe = FeatureEngineer(lags=12)
                 features_data = fe.transform(data)
 
+                if len(features_data) == 0:
+                    st.error("Недостаточно данных для обучения. Нужно минимум 13 месяцев исторических данных (из-за 12 лагов).")
+                    st.stop()
+
                 X = features_data.drop(columns=['value'])
                 y = features_data['value']
 
@@ -88,10 +96,12 @@ if uploaded_file is not None:
                 cat_cols = ['month_encoded', 'year_encoded', 'is_quarter_end', 'is_holiday']
                 cat_indices = [X.columns.get_loc(c) for c in cat_cols if c in X.columns]
 
+                # Масштабирование
                 scaler = StandardScaler()
                 X_scaled = X.copy()
                 X_scaled[numeric_cols] = scaler.fit_transform(X[numeric_cols])
 
+                # Обучение модели
                 model = CatBoostRegressor(
                     iterations=1500,
                     learning_rate=0.05,
@@ -135,15 +145,14 @@ if uploaded_file is not None:
                     shap.summary_plot(shap_values, X_scaled, plot_type="bar", show=False)
                     st.pyplot(fig_shap)
 
-                # Инициализируем прогноз в session_state
                 st.session_state.last_forecast_months = None
 
-        # Прогноз на будущее (вне кнопки — всегда доступен после запуска)
+        # Прогноз на будущее (всегда доступен после запуска)
         if 'features_data' in st.session_state:
             st.header("Прогноз на будущее")
             months_ahead = st.slider("Месяцев вперёд", 1, 36, 12, key="forecast_slider")
 
-            # Пересчитываем только если изменилось количество месяцев
+            # Пересчитываем только при изменении количества месяцев
             if 'last_forecast_months' not in st.session_state or st.session_state.last_forecast_months != months_ahead:
                 with st.spinner("Расчёт прогноза..."):
                     last_row = st.session_state.features_data.iloc[-1:].copy()
@@ -179,7 +188,6 @@ if uploaded_file is not None:
 
                     future_predictions_rounded = np.round(future_pred).astype(int)
 
-                    # Сохраняем результат
                     st.session_state.future_predictions_rounded = future_predictions_rounded
                     st.session_state.future_dates = future_dates
                     st.session_state.last_forecast_months = months_ahead
