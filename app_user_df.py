@@ -105,7 +105,7 @@ if uploaded_file is not None:
                 model = CatBoostRegressor(
                     iterations=1500,
                     learning_rate=0.05,
-                    depth=6,
+                    depth=1,
                     random_seed=42,
                     verbose=False,
                     cat_features=cat_indices
