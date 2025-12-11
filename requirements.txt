@@ -1,7 +1,8 @@
-streamlit==1.38.0
-pandas==2.2.2
-matplotlib==3.9.2
-scikit-learn==1.5.2
-catboost==1.2.8  # Последняя версия с поддержкой NumPy 2.x и Python 3.13
-joblib==1.4.2
-openpyxl==3.1.5
+streamlit
+pandas
+numpy<2.0
+matplotlib
+scikit-learn
+catboost
+joblib
+openpyxl
