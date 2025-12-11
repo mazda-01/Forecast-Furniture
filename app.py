@@ -11,7 +11,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from catboost import CatBoostRegressor
 
 # Пути
-DATA_PATH = 'aux/Sample - Superstore.xls'
+DATA_PATH = 'aux/Sample - Superstore.xlsx'
 PIPELINE_FILE = 'furniture_forecast_pipeline.pkl'
 
 st.title("Прогноз продаж категории Furniture")
