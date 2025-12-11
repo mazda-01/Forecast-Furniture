@@ -1,27 +1,25 @@
 import streamlit as st
 import pandas as pd
-import joblib
 import numpy as np
 import matplotlib.pyplot as plt
-import os
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, TransformerMixin
 from catboost import CatBoostRegressor
+import os
 
-# Пути
+# Путь к файлу (конвертированный в .xlsx!)
 DATA_PATH = 'aux/Sample - Superstore.xlsx'
-PIPELINE_FILE = 'furniture_forecast_pipeline.pkl'
 
-st.title("Прогноз продаж категории Furniture")
+st.title("Прогноз продаж категории Furniture (Superstore)")
 
-# Проверка файла данных
+# Проверка файла
 if not os.path.exists(DATA_PATH):
     st.error(f"Файл не найден: {DATA_PATH}")
     st.stop()
 
-# Загрузка данных
+# Кэшированная загрузка данных
 @st.cache_data
 def load_data():
     return pd.read_excel(DATA_PATH)
@@ -60,8 +58,7 @@ class AddFeatures(BaseEstimator, TransformerMixin):
             data_monthly[f'lag_{i}'] = data_monthly['Sales'].shift(i)
 
         # Роллинги
-        rolling_windows = [3, 6, 12]
-        for w in rolling_windows:
+        for w in [3, 6, 12]:
             data_monthly[f'rolling_mean_{w}'] = data_monthly['Sales'].rolling(w).mean()
             data_monthly[f'rolling_std_{w}'] = data_monthly['Sales'].rolling(w).std()
 
@@ -70,6 +67,7 @@ class AddFeatures(BaseEstimator, TransformerMixin):
         data_monthly['year'] = data_monthly['Order Date'].dt.year
         data_monthly['is_quarter_end'] = data_monthly['Order Date'].dt.day.isin([30, 31])
         data_monthly['is_holiday'] = data_monthly['Order Date'].dt.weekday >= 5
+
         data_monthly['diff_1'] = data_monthly['Sales'].diff(1)
         data_monthly['pct_change'] = data_monthly['Sales'].pct_change()
         data_monthly['max_6'] = data_monthly['Sales'].rolling(6).max()
@@ -79,7 +77,7 @@ class AddFeatures(BaseEstimator, TransformerMixin):
         data_monthly['month_encoded'] = data_monthly['month'].astype('category')
         data_monthly['year_encoded'] = data_monthly['year'].astype('category')
 
-        # Статистики по лагам (lag_1)
+        # Статистики по lag_1
         for i in range(1, 2):
             col = f'lag_{i}'
             data_monthly[f'{col}_mean'] = data_monthly[col].rolling(3).mean()
@@ -87,11 +85,11 @@ class AddFeatures(BaseEstimator, TransformerMixin):
             data_monthly[f'{col}_range'] = data_monthly[col].rolling(3).max() - data_monthly[col].rolling(3).min()
 
         data_monthly.dropna(inplace=True)
-        data_monthly = data_monthly.set_index('Order Date')  # Дата как индекс
+        data_monthly = data_monthly.set_index('Order Date')
         return data_monthly
 
-# Функция обучения
-def train_pipeline(df):
+# Обучение модели (всегда при запуске — надёжно)
+with st.spinner("Обработка данных и обучение модели..."):
     preprocess_pipeline = Pipeline([
         ('preprocessing', DataPreprocessing(category='Furniture')),
         ('features', AddFeatures(lags=12))
@@ -125,31 +123,16 @@ def train_pipeline(df):
 
     model_pipeline.fit(X, y)
 
-    full_pipeline = {
-        'preprocess': preprocess_pipeline,
-        'model': model_pipeline
-    }
-    joblib.dump(full_pipeline, PIPELINE_FILE)
-    return full_pipeline
 
-# Загрузка или обучение модели
-if os.path.exists(PIPELINE_FILE):
-    full_pipeline = joblib.load(PIPELINE_FILE)
-else:
-    with st.spinner("Обучение модели..."):
-        full_pipeline = train_pipeline(df)
-
-# Применение препроцессинга
-features_data = full_pipeline['preprocess'].fit_transform(df)  # fit_transform безопасен всегда
-X = features_data.drop(columns=['Sales'])
-predictions = full_pipeline['model'].predict(X)
+# Предсказания на истории
+predictions = model_pipeline.predict(X)
 predictions_rounded = np.round(predictions).astype(int)
 
-# График факт vs предсказание на истории
+# График истории
 fig1, ax1 = plt.subplots(figsize=(12, 6))
 ax1.plot(features_data.index, features_data['Sales'], label='Фактические', marker='o')
-ax1.plot(features_data.index, predictions_rounded, label='Предсказанные (на истории)', marker='x', linestyle='--')
-ax1.set_title('Продажи Furniture по месяцам')
+ax1.plot(features_data.index, predictions_rounded, label='Предсказанные', marker='x', linestyle='--')
+ax1.set_title('Продажи Furniture по месяцам (факт vs модель)')
 ax1.set_ylabel('Продажи')
 ax1.legend()
 st.pyplot(fig1)
@@ -161,16 +144,14 @@ months_ahead = st.slider("Месяцев вперёд", 1, 36, 12)
 last_date = features_data.index.max()
 future_dates = pd.date_range(last_date + pd.DateOffset(months=1), periods=months_ahead, freq='M')
 
-# Рекурсивный прогноз
 future_predictions = []
 current_row = features_data.iloc[-1:].copy()
 
-for _ in range(months_ahead):
+for i in range(months_ahead):
     X_future = current_row.drop(columns=['Sales'])
-    pred = full_pipeline['model'].predict(X_future)[0]
+    pred = model_pipeline.predict(X_future)[0]
     future_predictions.append(pred)
 
-    # Обновляем строку для следующего шага
     next_row = current_row.copy()
     next_row['Sales'] = pred
 
@@ -179,31 +160,30 @@ for _ in range(months_ahead):
         next_row[f'lag_{lag}'] = current_row[f'lag_{lag-1}'].values[0]
     next_row[f'lag_1'] = pred
 
-    # Обновляем дату и связанные фичи
-    next_date = future_dates[len(future_predictions)-1]
+    # Обновление фич даты
+    next_date = future_dates[i]
     next_row['month'] = next_date.month
     next_row['year'] = next_date.year
-    next_row['month_encoded'] = next_row['month'].astype('category')
-    next_row['year_encoded'] = next_row['year'].astype('category')
+    next_row['month_encoded'] = pd.Categorical([next_date.month], categories=range(1, 13))
+    next_row['year_encoded'] = pd.Categorical([next_date.year])
     next_row['is_quarter_end'] = next_date.day in [30, 31]
     next_row['is_holiday'] = next_date.weekday() >= 5
     next_row['trend'] = current_row['trend'].values[0] + 1
 
     current_row = next_row
 
-# Округление прогнозов
 future_predictions_rounded = np.round(future_predictions).astype(int)
 
-# График с прогнозом
+# График прогноза
 fig2, ax2 = plt.subplots(figsize=(12, 6))
 ax2.plot(features_data.index, features_data['Sales'], label='Исторические', marker='o')
 ax2.plot(future_dates, future_predictions_rounded, label='Прогноз', color='green', marker='s')
-ax2.set_title(f'Прогноз на {months_ahead} месяцев')
+ax2.set_title(f'Прогноз продаж Furniture на {months_ahead} месяцев')
 ax2.set_ylabel('Продажи')
 ax2.legend()
 st.pyplot(fig2)
 
-# Таблица прогноза — целые числа с разделителем тысяч
+# Таблица прогноза
 forecast_df = pd.DataFrame({
     'Месяц': future_dates.strftime('%Y-%m'),
     'Прогноз продаж': future_predictions_rounded
