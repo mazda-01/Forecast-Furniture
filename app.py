@@ -8,11 +8,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, TransformerMixin
 from catboost import CatBoostRegressor
 import os
+from sklearn.base import BaseEstimator, RegressorMixin
 
 # Путь к файлу (конвертированный в .xlsx!)
 DATA_PATH = 'aux/Sample - Superstore.xlsx'
 
-st.title("Прогноз продаж категории Furniture (Superstore)")
+st.title("Прогноз продаж категории Furniture")
 
 # Проверка файла
 if not os.path.exists(DATA_PATH):
@@ -88,6 +89,18 @@ class AddFeatures(BaseEstimator, TransformerMixin):
         data_monthly = data_monthly.set_index('Order Date')
         return data_monthly
 
+class CatBoostWrapper(BaseEstimator, RegressorMixin):
+    def __init__(self, **params):
+        self.params = params
+
+    def fit(self, X, y):
+        self.model_ = CatBoostRegressor(**self.params)
+        self.model_.fit(X, y)
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(X)
+
 # Обучение модели (всегда при запуске — надёжно)
 with st.spinner("Обработка данных и обучение модели..."):
     preprocess_pipeline = Pipeline([
@@ -110,7 +123,7 @@ with st.spinner("Обработка данных и обучение модел�
 
     model_pipeline = Pipeline([
         ('preprocessor', preprocessor),
-        ('model', CatBoostRegressor(
+        ('model', CatBoostWrapper(
             iterations=2000,
             learning_rate=0.1,
             depth=1,
